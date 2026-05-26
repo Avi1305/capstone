@@ -1,3 +1,9 @@
+// Project selectors
+export const selectProjects = (state) => state.sandbox.projects
+export const selectCurrentProject = (state) => state.sandbox.currentProject
+export const selectIsLoadingProjects = (state) => state.sandbox.isLoadingProjects
+export const selectProjectsError = (state) => state.sandbox.projectsError
+
 // Sandbox selectors
 export const selectSandboxId = (state) => state.sandbox.sandboxId
 export const selectPreviewUrl = (state) => state.sandbox.previewUrl

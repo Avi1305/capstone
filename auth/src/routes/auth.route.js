@@ -48,11 +48,12 @@ router.get(
       });
 
       //set token in cookie
-      return res
+      res
         .cookie("token", token, {
           httpOnly: true,
           secure: false,
           sameSite: "lax",
+          domain: "localhost",
           path: "/",
           maxAge: 1000 * 60 * 60,
         })

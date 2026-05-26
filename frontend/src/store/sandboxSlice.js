@@ -1,6 +1,12 @@
 import { createSlice } from '@reduxjs/toolkit'
 
 const initialState = {
+  // Projects
+  projects: [],
+  currentProject: null,   // { _id, title, user, createdAt, updatedAt }
+  isLoadingProjects: false,
+  projectsError: null,
+
   // Sandbox
   sandboxId: null,
   previewUrl: null,
@@ -33,6 +39,25 @@ const sandboxSlice = createSlice({
   name: 'sandbox',
   initialState,
   reducers: {
+    // ── Projects ─────────────────────────────────────────────────────────
+    setProjects(state, action) {
+      state.projects = action.payload
+      state.projectsError = null
+    },
+    setProjectsLoading(state, action) {
+      state.isLoadingProjects = action.payload
+    },
+    setProjectsError(state, action) {
+      state.projectsError = action.payload
+      state.isLoadingProjects = false
+    },
+    setCurrentProject(state, action) {
+      state.currentProject = action.payload
+    },
+    addProject(state, action) {
+      state.projects.unshift(action.payload)
+    },
+
     // ── Sandbox ──────────────────────────────────────────────────────────
     setSandboxStarting(state, action) {
       state.isSandboxStarting = action.payload
@@ -52,6 +77,7 @@ const sandboxSlice = createSlice({
       state.previewUrl = null
       state.isSandboxStarting = false
       state.sandboxError = null
+      state.currentProject = null
       state.messages = []
       state.isStreaming = false
       state.streamingMessage = ''
@@ -151,6 +177,11 @@ const sandboxSlice = createSlice({
 })
 
 export const {
+  setProjects,
+  setProjectsLoading,
+  setProjectsError,
+  setCurrentProject,
+  addProject,
   setSandboxStarting,
   setSandboxReady,
   setSandboxError,

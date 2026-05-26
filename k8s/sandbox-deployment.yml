@@ -48,4 +48,14 @@ spec:
                 secretKeyRef:
                   name: database
                   key: REDIS_URL
+            - name: MONGODB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: database
+                  key: SANDBOX
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: jwt
+                  key: JWT_SECRET_KEY
           

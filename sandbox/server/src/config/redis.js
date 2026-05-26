@@ -14,7 +14,7 @@ export async function createSandBoxKey(sandboxId) {
       status: "active",
     }),
     "EX",
-    120,
+    60 * 20,
   );
 }
 

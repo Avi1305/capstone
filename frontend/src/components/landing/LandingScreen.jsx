@@ -1,10 +1,22 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
-import { Zap, Terminal, Code2, Sparkles, ArrowRight, Globe, Star } from 'lucide-react'
-import { startSandbox } from '../../api/sandbox'
-import { setSandboxStarting, setSandboxReady, setSandboxError } from '../../store/sandboxSlice'
-import { selectIsSandboxStarting } from '../../store/selectors'
-import { Button } from '../ui/Button'
+import { Zap, Terminal, Code2, Sparkles, ArrowRight, Globe, Star, FolderOpen, Plus, Clock, Loader2 } from 'lucide-react'
+import { createProject, getProjects, startSandbox, getOrStartSandbox, saveProjectMeta, getLocalProjects, getSandboxForProject } from '../../api/sandbox'
+import {
+  setSandboxStarting,
+  setSandboxReady,
+  setSandboxError,
+  setProjects,
+  setProjectsLoading,
+  setProjectsError,
+  setCurrentProject,
+  addProject,
+} from '../../store/sandboxSlice'
+import {
+  selectIsSandboxStarting,
+  selectProjects,
+  selectIsLoadingProjects,
+} from '../../store/selectors'
 import toast from 'react-hot-toast'
 
 const features = [
@@ -14,23 +26,103 @@ const features = [
   { icon: Zap, label: 'Instant Preview', desc: 'Hot-reload browser' },
 ]
 
+function formatDate(iso) {
+  return new Date(iso).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+  })
+}
+
 export function LandingScreen() {
   const dispatch = useDispatch()
   const isSandboxStarting = useSelector(selectIsSandboxStarting)
+  const projects = useSelector(selectProjects)
+  const isLoadingProjects = useSelector(selectIsLoadingProjects)
 
   const [hovered, setHovered] = useState(false)
+  const [title, setTitle] = useState('')
+  const [isCreating, setIsCreating] = useState(false)
+  const [launchingId, setLaunchingId] = useState(null) // projectId being launched
 
-  const handleStart = useCallback(async () => {
-    dispatch(setSandboxStarting(true))
+  // Fetch projects on mount — merges API results with locally-cached projects
+  // so the list is always populated even if the API is temporarily unavailable.
+  useEffect(() => {
+    const fetchProjects = async () => {
+      dispatch(setProjectsLoading(true))
+      let apiProjects = []
+      try {
+        const data = await getProjects()
+        apiProjects = data.projects || []
+        // Keep local cache in sync with fresh API data
+        apiProjects.forEach(saveProjectMeta)
+      } catch (err) {
+        dispatch(setProjectsError(err.message))
+      }
+
+      // Merge: API projects first, then any locally-known projects not in the API list
+      const local = getLocalProjects()
+      const merged = [...apiProjects]
+      for (const lp of local) {
+        if (!merged.find(p => p._id === lp._id)) {
+          merged.push(lp)
+        }
+      }
+      dispatch(setProjects(merged))
+      dispatch(setProjectsLoading(false))
+    }
+    fetchProjects()
+  }, [dispatch])
+
+  // Create project → start sandbox
+  const handleCreate = useCallback(async (e) => {
+    e.preventDefault()
+    const trimmed = title.trim()
+    if (!trimmed) {
+      toast.error('Please enter a project title.')
+      return
+    }
+    setIsCreating(true)
     try {
-      const result = await startSandbox()
+      const { project } = await createProject(trimmed)
+      saveProjectMeta(project)          // persist locally for offline fallback
+      dispatch(addProject(project))
+      dispatch(setCurrentProject(project))
+      toast.success(`Project "${project.title}" created!`)
+
+      // Now start the sandbox
+      dispatch(setSandboxStarting(true))
+      const result = await startSandbox(project._id)
       dispatch(setSandboxReady({ sandboxId: result.sandboxId, previewUrl: result.previewUrl }))
       toast.success('Sandbox ready! Welcome to your AI IDE.')
     } catch (err) {
       dispatch(setSandboxError(err.message))
-      toast.error(`Failed to start sandbox: ${err.message}`)
+      toast.error(err.message)
+    } finally {
+      setIsCreating(false)
+    }
+  }, [dispatch, title])
+
+  // Launch existing project — reuses cached sandbox if available
+  const handleLaunchProject = useCallback(async (project) => {
+    setLaunchingId(project._id)
+    dispatch(setSandboxStarting(true))
+    dispatch(setCurrentProject(project))
+    try {
+      const result = await getOrStartSandbox(project._id)
+      dispatch(setSandboxReady({ sandboxId: result.sandboxId, previewUrl: result.previewUrl }))
+      toast.success(
+        result.fromCache
+          ? `Reopened "${project.title}"`
+          : `Sandbox started for "${project.title}"`
+      )
+    } catch (err) {
+      dispatch(setSandboxError(err.message))
+      toast.error(err.message)
+    } finally {
+      setLaunchingId(null)
     }
   }, [dispatch])
+
+  const isBusy = isCreating || isSandboxStarting
 
   return (
     <div
@@ -109,51 +201,78 @@ export function LandingScreen() {
         </h1>
 
         {/* Subtitle */}
-        <p className="text-base sm:text-lg text-[var(--text-secondary)] mb-10 max-w-lg leading-relaxed">
+        <p className="text-base sm:text-lg text-[var(--text-secondary)] mb-8 max-w-lg leading-relaxed">
           Describe what you want. Watch AI generate, edit, and deploy your full-stack app — live in seconds.
           Your personal AI pair programmer.
         </p>
 
-        {/* CTA Button */}
-        <button
-          id="start-sandbox-btn"
-          onClick={handleStart}
-          disabled={isSandboxStarting}
-          onMouseEnter={() => setHovered(true)}
-          onMouseLeave={() => setHovered(false)}
-          className="relative group mb-10 disabled:opacity-70 disabled:cursor-not-allowed"
+        {/* New project form */}
+        <form
+          onSubmit={handleCreate}
+          className="w-full max-w-lg flex gap-2 mb-6"
         >
-          <div
-            className="absolute inset-0 rounded-xl blur-lg opacity-40 group-hover:opacity-70 transition-opacity duration-300"
-            style={{ background: 'var(--primary)' }}
-          />
-          <div
-            className="relative flex items-center gap-3 px-8 py-4 rounded-xl text-white font-semibold text-base transition-all duration-200 active:scale-[0.98]"
+          <input
+            id="project-title-input"
+            type="text"
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            placeholder="Name your project…"
+            disabled={isBusy}
             style={{
-              background: 'linear-gradient(135deg, hsl(263,85%,60%), hsl(263,85%,72%))',
-              boxShadow: hovered ? '0 0 30px var(--primary-glow)' : '0 0 15px var(--primary-glow)',
+              flex: 1,
+              padding: '10px 16px',
+              borderRadius: '10px',
+              border: '1px solid var(--border-subtle)',
+              background: 'var(--bg-surface)',
+              color: 'var(--text-primary)',
+              fontSize: '14px',
+              fontFamily: 'Inter, sans-serif',
+              outline: 'none',
+              transition: 'border-color 0.15s',
             }}
+            onFocus={e => e.target.style.borderColor = 'var(--primary)'}
+            onBlur={e => e.target.style.borderColor = 'var(--border-subtle)'}
+          />
+          <button
+            id="create-project-btn"
+            type="submit"
+            disabled={isBusy}
+            onMouseEnter={() => setHovered(true)}
+            onMouseLeave={() => setHovered(false)}
+            className="relative group disabled:opacity-70 disabled:cursor-not-allowed"
           >
-            {isSandboxStarting ? (
-              <>
-                <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Starting your sandbox...
-              </>
-            ) : (
-              <>
-                <Zap size={18} fill="white" />
-                Start Sandbox
-                <ArrowRight
-                  size={18}
-                  className={`transition-transform duration-200 ${hovered ? 'translate-x-1' : ''}`}
-                />
-              </>
-            )}
-          </div>
-        </button>
+            <div
+              className="absolute inset-0 rounded-xl blur-md opacity-40 group-hover:opacity-70 transition-opacity duration-300"
+              style={{ background: 'var(--primary)' }}
+            />
+            <div
+              className="relative flex items-center gap-2 px-5 py-2.5 rounded-xl text-white font-semibold text-sm transition-all duration-200 active:scale-[0.98]"
+              style={{
+                background: 'linear-gradient(135deg, hsl(263,85%,60%), hsl(263,85%,72%))',
+                boxShadow: hovered ? '0 0 24px var(--primary-glow)' : '0 0 10px var(--primary-glow)',
+              }}
+            >
+              {isBusy ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  {isCreating ? 'Creating…' : 'Starting…'}
+                </>
+              ) : (
+                <>
+                  <Plus size={15} />
+                  New Project
+                  <ArrowRight
+                    size={15}
+                    className={`transition-transform duration-200 ${hovered ? 'translate-x-0.5' : ''}`}
+                  />
+                </>
+              )}
+            </div>
+          </button>
+        </form>
 
         {/* Feature pills */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full max-w-xl">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full max-w-xl mb-10">
           {features.map(({ icon: Icon, label, desc }) => (
             <div
               key={label}
@@ -165,6 +284,85 @@ export function LandingScreen() {
             </div>
           ))}
         </div>
+
+        {/* Existing projects */}
+        <div className="w-full max-w-xl">
+          <div className="flex items-center gap-2 mb-3">
+            <FolderOpen size={13} className="text-[var(--text-muted)]" />
+            <span className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
+              Recent Projects
+            </span>
+          </div>
+
+          {isLoadingProjects ? (
+            <div className="flex items-center justify-center gap-2 py-6 text-[var(--text-muted)] text-xs">
+              <Loader2 size={14} className="animate-spin" />
+              Loading projects…
+            </div>
+          ) : projects.length === 0 ? (
+            <p className="text-xs text-[var(--text-disabled)] text-center py-6">
+              No projects yet — create your first one above.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {projects.map((project) => {
+                const hasCached = !!getSandboxForProject(project._id)
+                const isLaunching = launchingId === project._id
+                return (
+                  <div
+                    key={project._id}
+                    className="flex items-center justify-between px-4 py-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--primary-glow)] hover:bg-[var(--bg-elevated)] transition-all duration-200 group"
+                  >
+                    <div className="flex flex-col items-start gap-0.5 text-left">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-[var(--text-primary)] group-hover:text-[var(--primary)] transition-colors">
+                          {project.title}
+                        </span>
+                        {hasCached && (
+                          <span
+                            className="flex items-center gap-1 text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
+                            style={{
+                              background: 'hsl(142,60%,15%)',
+                              color: 'hsl(142,70%,50%)',
+                              border: '1px solid hsl(142,60%,25%)',
+                            }}
+                          >
+                            <span className="w-1 h-1 rounded-full bg-[hsl(142,70%,50%)] inline-block" />
+                            saved
+                          </span>
+                        )}
+                      </div>
+                      <span className="flex items-center gap-1 text-[10px] text-[var(--text-disabled)]">
+                        <Clock size={9} />
+                        {formatDate(project.createdAt)}
+                      </span>
+                    </div>
+                    <button
+                      id={`launch-project-${project._id}`}
+                      onClick={() => handleLaunchProject(project)}
+                      disabled={isBusy}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{
+                        background: hasCached ? 'hsl(142,60%,15%)' : 'var(--primary-subtle)',
+                        color: hasCached ? 'hsl(142,70%,50%)' : 'var(--primary)',
+                        border: `1px solid ${hasCached ? 'hsl(142,60%,25%)' : 'var(--primary-glow)'}`,
+                      }}
+                    >
+                      {isLaunching ? (
+                        <Loader2 size={11} className="animate-spin" />
+                      ) : hasCached ? (
+                        <Zap size={11} fill="currentColor" />
+                      ) : (
+                        <Plus size={11} />
+                      )}
+                      {isLaunching ? 'Starting…' : hasCached ? 'Resume' : 'Launch'}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
       </main>
 
       {/* Footer */}
@@ -174,3 +372,4 @@ export function LandingScreen() {
     </div>
   )
 }
+

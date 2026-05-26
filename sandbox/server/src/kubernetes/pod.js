@@ -1,6 +1,6 @@
 import { K8sCoreV1Api } from "./config.js";
 
-export const createPod = async (sandBoxId) => {
+export const createPod = async (sandBoxId,projectId) => {
   const podManifest = {
     metadata: {
       name: `sandbox-${sandBoxId}`,
@@ -62,6 +62,55 @@ export const createPod = async (sandBoxId) => {
             },
           ],
         },
+        {
+          name: "sync-agent-container",
+          image: "sync-agent",
+          imagePullPolicy: "IfNotPresent",
+          ports: [{ containerPort: 4000, name: "sync-http" }],
+          resources: {
+            limits: { cpu: "500m", memory: "1Gi" },
+            requests: { cpu: "250m", memory: "500Mi" },
+          },
+          volumeMounts: [
+            {
+              name: "workspace-volume",
+              mountPath: "/workspace",
+            }],
+          env:[
+            {
+              name:"AWS_ACCESS_KEY_ID",
+              valueFrom:{
+                secretKeyRef:{
+                  name:"aws",
+                  key:"AWS_ACCESS_KEY_ID"
+                }
+              }
+            },
+            {
+              name:"AWS_SECRET_ACCESS_KEY",
+              valueFrom:{
+                secretKeyRef:{
+                  name:"aws",
+                  key:"AWS_SECRET_ACCESS_KEY"
+                }
+              }
+            },
+            {
+              name:"AWS_REGION",
+              valueFrom:{
+                secretKeyRef:{
+                  name:"aws",
+                  key:"AWS_REGION"
+                }
+              }
+            },
+            {
+              name:"PROJECT_ID",
+              value: projectId
+            }
+          ]
+          }
+
       ],
     },
   };
