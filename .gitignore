@@ -1,0 +1,6 @@
+secrets.yml
+node_modules
+.env
+dist
+build
+coverage
